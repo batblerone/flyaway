@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fly Away, Fly!</title>
+  <link rel="icon" href="assets/sprites/grape_icon.png">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0f140f;
+      color: #dcdcd2;
+      font-family: Georgia, "Times New Roman", serif;
+      overflow: hidden;
+    }
+    /* Bevy sizes the canvas to fit this box (fit_canvas_to_parent). */
+    #stage {
+      position: fixed;
+      inset: 0;
+    }
+    #game {
+      display: block;
+      outline: none;
+      touch-action: none;
+    }
+    #status {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 24px;
+      font-size: 22px;
+      pointer-events: none;
+    }
+    #status.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="stage"><canvas id="game" tabindex="0"></canvas></div>
+  <div id="status">Loading…</div>
+
+  <script>
+    // Browsers keep audio switched off until the page gets a click or key
+    // press. Bevy creates its AudioContext before that happens, so remember
+    // every context that gets made and wake them all up on the first input.
+    (function () {
+      const contexts = [];
+      const Original = window.AudioContext || window.webkitAudioContext;
+      if (!Original) return;
+      window.AudioContext = new Proxy(Original, {
+        construct(target, args) {
+          const ctx = new target(...args);
+          contexts.push(ctx);
+          return ctx;
+        },
+      });
+      const wake = () => contexts.forEach((ctx) => ctx.state === "suspended" && ctx.resume());
+      ["pointerdown", "keydown", "touchstart"].forEach((type) =>
+        document.addEventListener(type, wake, { capture: true })
+      );
+    })();
+  </script>
+
+  <script type="module">
+    const status = document.getElementById("status");
+
+    // Having navigator.gpu isn't quite enough: some browsers expose it but
+    // won't hand out an adapter (Chrome on Linux without the flag, or a
+    // blocklisted GPU driver). Ask for one up front so we can say so, rather
+    // than leaving the page stuck on "Loading…".
+    const adapter = navigator.gpu ? await navigator.gpu.requestAdapter().catch(() => null) : null;
+
+    if (!adapter) {
+      status.textContent =
+        "This game needs WebGPU, which this browser doesn't have (or has switched off). " +
+        "Try a recent Chrome, Edge or Firefox, or Safari 26 or newer.";
+    } else {
+      let failed = false;
+      try {
+        const { default: init } = await import("./flyaway.js");
+        // This downloads and starts the wasm. It settles once the game's
+        // main loop has been handed over to the browser.
+        await init();
+      } catch (err) {
+        // Older winit versions escape their event loop by throwing on
+        // purpose. That one isn't a real failure.
+        if (!String(err).includes("Using exceptions for control flow")) {
+          failed = true;
+          console.error(err);
+          status.textContent = "Something went wrong starting the game. The browser console has the details.";
+        }
+      }
+      if (!failed) {
+        status.classList.add("hidden");
+        document.getElementById("game").focus();
+      }
+    }
+  </script>
+</body>
+</html>
